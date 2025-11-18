@@ -79,8 +79,4 @@ def build_inception(image_size=(299, 299), num_classes=10):
         in_features_aux = base.AuxLogits.fc.in_features
         base.AuxLogits.fc = nn.Linear(in_features_aux, num_classes)
 
-    # Check trainable parameters
-    trainable_params = sum(p.numel() for p in base.parameters() if p.requires_grad)
-    print(f"Trainable parameters: {trainable_params}")
-
     return base

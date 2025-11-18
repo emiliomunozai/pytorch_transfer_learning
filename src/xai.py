@@ -1,72 +1,112 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
-import matplotlib.pyplot as plt
 
-def grad_cam(model, img_array_01, last_conv_name, img_size, device='cuda'):
+
+def run_forward(model, x):
     """
-    Generates a Grad-CAM overlay for a given image in PyTorch (no OpenCV required).
+    Returns:
+        output: logits tensor (1,C)
+        pred:   python int
     """
     model.eval()
-    model.to(device)
+    if hasattr(model, "aux_logits"):
+        model.aux_logits = False
 
-    # Convert numpy image (H, W, C) -> torch tensor (1, C, H, W)
-    img_tensor = torch.from_numpy(img_array_01.transpose(2, 0, 1)).unsqueeze(0).float().to(device)
+    output = model(x)
+    pred = output.argmax(dim=1).item()
+    return output, pred
 
-    # Hook to capture gradients and activations
-    activations = {}
-    gradients = {}
+def attach_hooks(model, layer_name):
+    """
+    Returns:
+        remove(): a function to detach hooks
+        capture:  dict with 'act' and 'grad'
+    """
+    capture = {"act": None, "grad": None}
 
-    def forward_hook(module, input, output):
-        activations['value'] = output
+    def save_act(m, i, o):
+        capture["act"] = o
 
-    def backward_hook(module, grad_in, grad_out):
-        gradients['value'] = grad_out[0]
+    def save_grad(m, gi, go):
+        capture["grad"] = go[0]
 
-    # Register hooks on the chosen convolutional layer
-    for name, module in model.named_modules():
-        if name == last_conv_name:
-            module.register_forward_hook(forward_hook)
-            module.register_backward_hook(backward_hook)
-            break
-    else:
-        raise ValueError(f"Layer {last_conv_name} not found in model")
+    target = dict(model.named_modules())[layer_name]
 
-    # Forward + backward passes
-    outputs = model(img_tensor)
-    class_idx = torch.argmax(outputs, dim=1).item()
+    h1 = target.register_forward_hook(save_act)
+    h2 = target.register_backward_hook(save_grad)
 
-    model.zero_grad()
-    target = outputs[0, class_idx]
-    target.backward()
+    def remove():
+        h1.remove()
+        h2.remove()
 
-    # Extract data
-    act = activations['value'].detach()
-    grad = gradients['value'].detach()
+    return capture, remove
 
-    # Global average pool gradients
-    weights = torch.mean(grad, dim=(2, 3), keepdim=True)
-    cam = torch.sum(weights * act, dim=1).squeeze()
+def run_backward(output, pred_class):
+    """
+    Backprop for the predicted class.
+    """
+    output[:, pred_class].sum().backward()
 
-    # Normalize CAM to [0, 1]
+def compute_gradcam(activations, gradients):
+    """
+    activations: (1, C, H, W)
+    gradients:   (1, C, H, W)
+
+    Returns:
+        cam: torch tensor (H, W), float32, normalized [0,1]
+    """
+    C, H, W = activations.shape[1:]
+
+    # GAP → (C,)
+    weights = gradients[0].mean(dim=(1, 2))  
+
+    # Weighted sum → (H, W)
+    cam = (weights[:, None, None] * activations[0]).sum(dim=0)
+
     cam = torch.relu(cam)
     cam -= cam.min()
-    cam /= (cam.max() + 1e-8)
+    if cam.max() > 0:
+        cam = cam / cam.max()
 
-    # Resize heatmap with torch.interpolate instead of cv2
+    return cam.float()
+
+import torch.nn.functional as F
+
+def resize_cam(cam, H, W):
+    """
+    cam: (Hc, Wc); torch float32
+    Returns: resized (H, W)
+    """
     cam_resized = F.interpolate(
         cam.unsqueeze(0).unsqueeze(0),
-        size=(img_size[0], img_size[1]),
-        mode='bilinear',
+        size=(H, W),
+        mode="bilinear",
         align_corners=False
-    ).squeeze().cpu().numpy()
+    )[0, 0]
+    return cam_resized
 
-    # Apply matplotlib colormap
-    cmap = plt.get_cmap('jet')
-    heatmap_colored = cmap(cam_resized)[..., :3]
 
-    # Blend with the original image
-    overlay = (img_array_01 * 0.6) + (heatmap_colored * 0.4)
-    overlay = np.clip(overlay, 0, 1)
+def tensor_to_uint8(img_t):
+    """
+    img_t: (3,H,W) torch tensor
+    Returns: (H,W,3) uint8 numpy
+    """
+    img_t = img_t.detach().cpu()
 
-    return overlay
+    mn, mx = img_t.min(), img_t.max()
+    if mx > mn:
+        img_t = (img_t - mn) / (mx - mn)
+    else:
+        img_t = torch.zeros_like(img_t)
+
+    arr = (img_t.permute(1,2,0).numpy() * 255).astype(np.uint8)
+    return arr
+
+def cam_to_uint8(cam):
+    """
+    cam: (H,W) float32 torch
+    Returns (H,W) uint8 numpy
+    """
+    cam_np = (cam.detach().cpu().numpy() * 255).astype(np.uint8)
+    return cam_np

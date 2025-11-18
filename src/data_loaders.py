@@ -50,6 +50,22 @@ def load_cifar10(val_ratio=0.1, seed=42):
     return train_dataset, val_dataset, test_dataset
 
 
+def load_food101(val_ratio=0.1, seed=42):
+    full_train = datasets.Food101(root='./data', split="train", download=True)
+    test_dataset = datasets.Food101(root='./data', split="test", download=True)
+
+    n_val = int(len(full_train) * val_ratio)
+    n_train = len(full_train) - n_val
+
+    train_dataset, val_dataset = random_split(
+        full_train, [n_train, n_val],
+        generator=torch.Generator().manual_seed(seed)
+    )
+
+    return train_dataset, val_dataset, test_dataset
+    
+
+
 # -------------------------------------------------------------------
 # Create DataLoaders for model training / validation / testing
 # -------------------------------------------------------------------

@@ -97,7 +97,7 @@ def train_model(model, model_name, train_loader, val_loader, criterion, optimize
               f"Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.2f}%")
 
     # Save model
-    torch.save(model.state_dict(), f"models/{model_name}_model.pth")
+    torch.save(model, f"models/{model_name}_model.pth")
 
     return train_losses, val_losses, train_accs, val_accs
 
