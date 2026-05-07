@@ -1,3 +1,6 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
 # Undo normalization for visualization
 def unnormalize(img, mean, std):
     img = img.numpy().transpose((1, 2, 0))  # CHW -> HWC
