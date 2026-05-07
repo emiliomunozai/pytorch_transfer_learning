@@ -103,7 +103,7 @@ def train_model(model, model_name, train_loader, val_loader, criterion, optimize
 
 
 # ================================
-# Random Search Pipeline (CORREGIDO para tu grid con "optimizers" y "regularizers")
+# Random Search Pipeline
 # ================================
 def random_search_pipeline(
     param_grid,
